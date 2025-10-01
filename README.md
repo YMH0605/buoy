@@ -24,16 +24,22 @@ pytorch-lightning meteostat pvlib astral
 ## Quickstart
 
 ```python
-from main import LSTM, Predict
-import torch
+from data_processing import *
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model = LSTM(num_classes=2, input_size=3, hidden_size=64, num_layers=3).to(device)
-model.load_state_dict(torch.load('lstm_on_bouy.pth', map_location=device))
+# 1. Load the model
+filepath = 'lstm_on_bouy.pth'
+lstm = LSTM(num_classes=2, input_size=3, hidden_size=64, num_layers=3).to(device)
+lstm.load_state_dict(torch.load(filepath, map_location=device))
 
-# 6 steps (~60 min) for pond 1
-dataX, df_now, yhat, *_ = Predict(1, 6, model)
-print(yhat)  # (n_ahead, 1, 3): [DO_mgL, Temp_C, hour_minute]
+# 2. Prediction Process
+dataX, do, future_predicts, train_size, val_size, mean, std = Predict(
+    1,     # First parameter：pond_id (1, 2, 5, 18, 19, 21, 22, 30, 52)
+    6,     # Second parameter：how many time steps ahead (10mins each step，6 steps = 60mins)
+    lstm   # Third parameters：Loaded model
+)
+
+# 3. See Prediction Result
+print(future_predicts)
 ```
 
 ## Defaults
@@ -45,16 +51,13 @@ print(yhat)  # (n_ahead, 1, 3): [DO_mgL, Temp_C, hour_minute]
 
 ## Notes
 
-* Last 10 records are dropped before modeling to avoid partial packets.
+* Only last 20 results are loaded to faster the process.
 * Standardization is fit on the train slice inside `Load_Data`.
 * If you split utilities to `data_processing.py`, remove duplicates in `main.py`.
 
 ## Troubleshooting
 
 * **`fb_key.json` not found** → place file in working dir or use absolute path.
-* **Shape mismatch** → make sure model hyperparams at inference match training.
-* **Empty data** → check date filter and `type=='a_buoy'`.
-
 ## License
 
-Add your license here (e.g., MIT).
+
