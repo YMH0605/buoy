@@ -420,6 +420,51 @@ def convert_tensor(arr):
     last_sequence = last_sequence.to(device)
     return last_sequence
 
+def get_latest(pond_number):
+    base_path = '/LH_Farm/pond_'
+    pond = f"{base_path}{pond_number}"  #Get data from the firebase
+    ref = db.reference(pond).order_by_key().limit_to_last(20)
+    data = ref.get()
+    df = pd.DataFrame(data)
+    df = df.T
+    
+    df = df[df['type'] == 'a_buoy']
+    df = df[df.index.str[:8] > '20250701']
+    df_do_related = df[['do', 'temp', 'pressure']]
+    df_init_do = df[['init_do']]
+
+    #do_res = remove_outliers_from_df(df_do_related)
+    do_mean = Convert_mean(df_do_related) # Get mean of DO
+    do_mean = pd.concat([do_mean, df_init_do], axis=1)
+    do_mean['do'] = do_mean.apply(lambda row: convert_to_mgl(100 * row['do'] / row['init_do'], row['temp'], row['pressure']), axis=1)
+
+    do_mean['datetime'] = pd.to_datetime(do_mean.index, format='%Y%m%d_%H:%M:%S')
+
+    do_mean['datetime'] = do_mean['datetime'].dt.tz_localize('UTC')
+    do_mean['datetime'] = do_mean['datetime'].dt.tz_convert('America/Chicago')
+
+    do_mean['hour'] = do_mean['datetime'].dt.hour
+    do_mean['minute'] = do_mean['datetime'].dt.minute
+    do_mean['hour_minute'] = do_mean['hour'] + do_mean['minute'] / 60.0
+
+    do_mean['formatted_index'] = do_mean['datetime'].dt.strftime('%Y%m%d_%H:%M:%S')
+    do_mean = do_mean.set_index('formatted_index', drop=True)
+    do_mean = do_mean.drop('datetime', axis = 1)
+    do_mean = do_mean.drop('hour', axis = 1)
+    do_mean = do_mean.drop('minute', axis = 1)
+    do_mean = do_mean.iloc[:-10]
+    do_mean['datetime'] = pd.to_datetime(do_mean.index, format='%Y%m%d_%H:%M:%S')
+
+    do_mean_index = do_mean.index
+
+
+    do_mean = do_mean[['do', 'temp', 'hour_minute']]
+    do_mean = do_mean.dropna()
+    with open('latest_data.json', 'w') as f:
+        json.dump(data, f)
+
+    return do_mean
+
 
 
 def Predict(pond_id, n_ahead, model):
@@ -434,7 +479,7 @@ def Predict(pond_id, n_ahead, model):
         dataX, do, future_predicts, train_size, val_size, mean, std
     """
     # 获取数据
-    data = getData_5feature_tensor(pond_id)
+    data = get_latest(pond_id)
     future_predicts = []
     _, _, _, _, _, _, dataX, dataY, train_size, val_size, mean, std = Load_Data(data)
     do = data.iloc[:, :]
@@ -501,3 +546,5 @@ def Predict(pond_id, n_ahead, model):
     future_predicts = np.array(future_predicts)
     
     return dataX, do, future_predicts, train_size, val_size, mean, std
+
+
