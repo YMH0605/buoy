@@ -340,29 +340,29 @@ class LSTM(nn.Module):
         self.input_size = input_size
         self.hidden_size = hidden_size
         
-        # LSTM with dropout (注意：只在num_layers > 1时才能使用LSTM内部的dropout)
+       
         self.lstm = nn.LSTM(
             input_size=input_size, 
             hidden_size=hidden_size,
             num_layers=num_layers, 
             batch_first=True, 
-            dropout=0.3 if num_layers > 1 else 0  # LSTM层间dropout
+            dropout=0.3 if num_layers > 1 else 0 
         )
         
-        # Dropout层
-        self.dropout1 = nn.Dropout(0.5)  # 第一个FC层前的dropout
-        self.dropout2 = nn.Dropout(0.4)  # 第二个FC层前的dropout
+       
+        self.dropout1 = nn.Dropout(0.5) 
+        self.dropout2 = nn.Dropout(0.4)  
         
         # Batch Normalization
         self.bn1 = nn.BatchNorm1d(hidden_size)
         self.bn2 = nn.BatchNorm1d(128)
         
-        # 全连接层
+ 
         self.fc_1 = nn.Linear(hidden_size, 128)
         self.relu = nn.ReLU()
         self.fc_2 = nn.Linear(128, num_classes)
         
-        # 初始化权重
+ 
         self._init_weights()
 
     def _init_weights(self):
@@ -380,30 +380,29 @@ class LSTM(nn.Module):
                         nn.init.zeros_(param)
 
     def forward(self, x):
-        # 初始化隐藏状态
+
         h_0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(x.device)
         c_0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(x.device)
         
-        # LSTM前向传播
+
         output, (hn, cn) = self.lstm(x, (h_0, c_0))
         
-        # 取最后一个时间步的输出
+
         out = output[:, -1, :]
         
-        # 应用Batch Norm和Dropout
+ 
         out = self.bn1(out)
         out = self.dropout1(out)
         
-        # 第一个全连接层
+
         out = self.fc_1(out)
         out = self.bn2(out)
         out = self.relu(out)
         out = self.dropout2(out)
         
-        # 输出层
+
         out = self.fc_2(out)
-        
-        # Reshape到期望的输出格式
+    
         out = out.view(out.size(0), 1, -1)
         
         return out
@@ -468,80 +467,70 @@ def get_latest(pond_number):
 
 
 def Predict(pond_id, n_ahead, model):
-    """
-    修改后的预测函数，适用于每10分钟采样的24小时连续数据
-    
-    Args:
-        pond_id: 池塘ID
-        n_ahead: 预测未来多少个时间步（每步10分钟）
-    
-    Returns:
-        dataX, do, future_predicts, train_size, val_size, mean, std
-    """
-    # 获取数据
+
+
     data = get_latest(pond_id)
     future_predicts = []
     _, _, _, _, _, _, dataX, dataY, train_size, val_size, mean, std = Load_Data(data)
     do = data.iloc[:, :]
 
-    # 使用最后4个观测值作为初始序列
+
     lastDay = do.tail(4) 
     last_hour_minute = lastDay['hour_minute'].iloc[-1]
     hold = lastDay
     lastDay = norimalize(lastDay, mean, std)
     
-    # 获取最后的日期时间
+
     last_date = data.index[-1]
     last_date = pd.to_datetime(data.index[-1], format='%Y%m%d_%H:%M:%S')
     
     predicted_datetimes = []
     cur_hour_minute = last_hour_minute
 
-    # 递归预测n_ahead步
+
     for i in range(n_ahead):
-        # 计算下一个时间点（每10分钟增加）
-        next_time_minutes = (cur_hour_minute * 60 + 10) % (24 * 60)  # 转换为分钟，加10分钟，24小时循环
-        next_hour_minute = next_time_minutes / 60.0  # 转换回小时格式
+ 
+        next_time_minutes = (cur_hour_minute * 60 + 10) % (24 * 60) 
+        next_hour_minute = next_time_minutes / 60.0  
         
-        # 更新日期时间（每10分钟）
+
         last_date = last_date + timedelta(minutes=10)
         predicted_datetimes.append(last_date)
         
         cur_hour_minute = next_hour_minute
 
-        # 转换为张量进行预测
+
         last_sequence = convert_tensor(lastDay)
         
-        # 模型预测
+
         model.eval()
         with torch.no_grad():
             future_predict = model(last_sequence)
         
-        # 处理预测输出
-        future_predict = future_predict[0, :, :]  # 假设输出形状为 (1, seq_len, features)
+
+        future_predict = future_predict[0, :, :] 
         future_predict = future_predict.detach().cpu().numpy()
         
-        # 由于模型只输出2个特征（do, temp），但标准化时可能有3个特征
-        # 需要为第三个特征（hour_minute）添加值
-        if future_predict.shape[1] == 2:  # 如果模型只输出2个特征
+       
+        if future_predict.shape[1] == 2: 
             # 添加hour_minute特征
             hour_minute_column = np.full((future_predict.shape[0], 1), next_hour_minute)
             future_predict = np.concatenate((future_predict, hour_minute_column), axis=1)
         
-        # 反标准化
+ 
         future_predict_de = denormalize(future_predict, mean, std)
         
-        # 确保hour_minute特征正确
-        future_predict_de[:, 2] = next_hour_minute  # 第三列是hour_minute
+   
+        future_predict_de[:, 2] = next_hour_minute  
         
         future_predicts.append(future_predict_de)
 
-        # 重新标准化用于下一次预测
+
         future_predict_de_norm = norimalize(future_predict_de, mean, std)
         
-        # 更新序列：移除最旧的观测，添加新预测
+   
         lastDay = np.append(lastDay, future_predict_de_norm, axis=0)
-        lastDay = lastDay[1:, :]  # 移除第一行，保持序列长度为4
+        lastDay = lastDay[1:, :] 
 
     future_predicts = np.array(future_predicts)
     
