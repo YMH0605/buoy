@@ -366,7 +366,7 @@ class LSTM(nn.Module):
         self._init_weights()
 
     def _init_weights(self):
-        """Xavier初始化帮助防止梯度消失/爆炸"""
+
         for m in self.modules():
             if isinstance(m, nn.Linear):
                 nn.init.xavier_uniform_(m.weight)
